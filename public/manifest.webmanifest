@@ -1,0 +1,9 @@
+{
+  "name": "PlanSnap - かんたん平面図",
+  "short_name": "PlanSnap",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f2e8",
+  "theme_color": "#f7f2e8",
+  "description": "現場で素早く、きれいに平面図を作るツール"
+}
