@@ -11,12 +11,14 @@ export type DrawingLine = {
 }
 export type DrawingRectangle = {
   id: string
-  center: Point
-  widthMm: number
-  heightMm: number
+  points: [Point, Point, Point, Point]
+  edgeLengthsMm: [number, number, number, number]
   rotation: number
   color: string
   width: number
+  center?: Point
+  widthMm?: number
+  heightMm?: number
 }
 export type DrawingDocument = {
   id: string

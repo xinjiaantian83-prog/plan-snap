@@ -33,7 +33,7 @@ npm run preview
 
 - PCでは「線」を選び、始点をクリックしてからポインタでプレビューし、終点をクリックして確定。Escまたは右クリックでキャンセル
 - スマートフォン・タブレットでは2タップ方式と、従来のドラッグ確定方式の両方に対応
-- 「図形」から横・縦の実寸を入力して四角形を中央へ生成。選択後は移動、回転、寸法再編集が可能
+- 「図形」から横・縦の実寸を入力して四角形を中央へ生成。4頂点を個別ドラッグして台形・不整形四辺形へ変形でき、各辺の実寸、全体移動・回転も再編集可能
 - 線をタップして選択し、ドラッグで移動
 - 選択時だけ表示されるパネルから長さ（mm）、色、太さ、実線・破線を編集
 - 2本指のピンチでズーム、2本指で移動。PCはホイールでズーム、Space + ドラッグで移動
@@ -65,9 +65,9 @@ type DrawingLine = {
 
 type DrawingRectangle = {
   id: string
-  center: { x: number; y: number }
-  widthMm: number
-  heightMm: number
+  points: [{ x: number; y: number }, { x: number; y: number },
+           { x: number; y: number }, { x: number; y: number }]
+  edgeLengthsMm: [number, number, number, number]
   rotation: number
   color: string
   width: number

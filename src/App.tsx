@@ -7,7 +7,18 @@ const EMPTY: DrawingDocument = { id: crypto.randomUUID(), name: '名称未設定
 const COLORS = ['#253331', '#2f6f69', '#bd5a43', '#42658c']
 type View = { x: number; y: number; scale: number }
 type DrawingState = Pick<DrawingDocument, 'lines' | 'rectangles'>
-type Gesture = { kind: 'draw'; start: Point; continuing: boolean } | { kind: 'move'; id: string; origin: Point; start: Point; end: Point } | { kind: 'rectMove'; id: string; origin: Point; center: Point } | { kind: 'pan'; origin: Point; view: View }
+type Gesture = { kind: 'draw'; start: Point; continuing: boolean } | { kind: 'move'; id: string; origin: Point; start: Point; end: Point } | { kind: 'rectMove'; id: string; origin: Point; points: [Point, Point, Point, Point] } | { kind: 'vertexMove'; id: string; index: number } | { kind: 'pan'; origin: Point; view: View }
+
+const edgeLengths = (points: [Point, Point, Point, Point]): [number, number, number, number] => points.map((point, index) => Math.round(distance(point, points[(index + 1) % 4]) * 10)) as [number, number, number, number]
+const rectangleCenter = (points: [Point, Point, Point, Point]): Point => ({ x: points.reduce((sum, point) => sum + point.x, 0) / 4, y: points.reduce((sum, point) => sum + point.y, 0) / 4 })
+const normalizeRectangle = (rectangle: DrawingRectangle): DrawingRectangle => {
+  if (rectangle.points?.length === 4) return { ...rectangle, edgeLengthsMm: rectangle.edgeLengthsMm ?? edgeLengths(rectangle.points) }
+  const center = rectangle.center ?? { x: 0, y: 0 }; const halfWidth = (rectangle.widthMm ?? 3000) / 20; const halfHeight = (rectangle.heightMm ?? 2000) / 20
+  const base: [Point, Point, Point, Point] = [{ x: -halfWidth, y: -halfHeight }, { x: halfWidth, y: -halfHeight }, { x: halfWidth, y: halfHeight }, { x: -halfWidth, y: halfHeight }]
+  const angle = (rectangle.rotation ?? 0) * Math.PI / 180
+  const points = base.map(point => ({ x: center.x + point.x * Math.cos(angle) - point.y * Math.sin(angle), y: center.y + point.x * Math.sin(angle) + point.y * Math.cos(angle) })) as [Point, Point, Point, Point]
+  return { ...rectangle, points, edgeLengthsMm: edgeLengths(points) }
+}
 
 export default function App() {
   const [doc, setDoc] = useState<DrawingDocument>(EMPTY)
@@ -67,6 +78,11 @@ export default function App() {
     if (!selectedRectangle) return
     commit({ lines: doc.lines, rectangles: (doc.rectangles ?? []).map(rectangle => rectangle.id === selectedRectangle.id ? { ...rectangle, ...patch } : rectangle) })
   }
+  const shapeSnapLines = (activeId: string): DrawingLine[] => {
+    const sides = (doc.rectangles ?? []).filter(rectangle => rectangle.id !== activeId).flatMap(rectangle => rectangle.points.map((point, index) => ({ id: '', start: point, end: rectangle.points[(index + 1) % 4], lengthMm: 0, color: '', width: 0, style: 'solid' as const })))
+    const perpendiculars = [...doc.lines, ...sides].map(line => ({ ...line, end: { x: line.start.x - (line.end.y - line.start.y), y: line.start.y + (line.end.x - line.start.x) } }))
+    return [...doc.lines, ...sides, ...perpendiculars]
+  }
 
   const finishLine = (start: Point, end: Point) => {
     if (distance(start, end) <= 4) return false
@@ -121,7 +137,16 @@ export default function App() {
     }
     if (gesture.kind === 'rectMove') {
       const delta = { x: world.x - gesture.origin.x, y: world.y - gesture.origin.y }
-      setDoc(d => ({ ...d, rectangles: d.rectangles.map(rectangle => rectangle.id === gesture.id ? { ...rectangle, center: { x: gesture.center.x + delta.x, y: gesture.center.y + delta.y } } : rectangle) }))
+      setDoc(d => ({ ...d, rectangles: d.rectangles.map(rectangle => rectangle.id === gesture.id ? { ...rectangle, points: gesture.points.map(point => ({ x: point.x + delta.x, y: point.y + delta.y })) as [Point, Point, Point, Point] } : rectangle) }))
+    }
+    if (gesture.kind === 'vertexMove') {
+      setDoc(d => ({ ...d, rectangles: d.rectangles.map(rectangle => {
+        if (rectangle.id !== gesture.id) return rectangle
+        const points = [...rectangle.points] as [Point, Point, Point, Point]
+        const previous = points[(gesture.index + 3) % 4]
+        points[gesture.index] = snapPoint(previous, world, shapeSnapLines(rectangle.id), snap)
+        return { ...rectangle, points, edgeLengthsMm: edgeLengths(points) }
+      }) }))
     }
   }
 
@@ -133,7 +158,7 @@ export default function App() {
       } else {
         setDrawingStart(gesture.start); setDraft({ start: gesture.start, end: gesture.start })
       }
-    } else if (gesture?.kind === 'move' || gesture?.kind === 'rectMove') commit({ lines: doc.lines, rectangles: doc.rectangles ?? [] })
+    } else if (gesture?.kind === 'move' || gesture?.kind === 'rectMove' || gesture?.kind === 'vertexMove') commit({ lines: doc.lines, rectangles: doc.rectangles ?? [] })
     setGesture(null)
   }
 
@@ -150,26 +175,48 @@ export default function App() {
   const selectRectangle = (e: React.PointerEvent, rectangle: DrawingRectangle) => {
     if (tool === 'line') return
     e.stopPropagation(); setSelected(rectangle.id); setTool('select')
-    setGesture({ kind: 'rectMove', id: rectangle.id, origin: worldPoint(screenPoint(e)), center: rectangle.center })
+    setGesture({ kind: 'rectMove', id: rectangle.id, origin: worldPoint(screenPoint(e)), points: rectangle.points })
+  }
+  const moveVertex = (e: React.PointerEvent, rectangle: DrawingRectangle, index: number) => {
+    e.stopPropagation(); setSelected(rectangle.id); setTool('select')
+    ;(e.currentTarget as SVGElement).setPointerCapture(e.pointerId)
+    pointers.current.set(e.pointerId, screenPoint(e)); setGesture({ kind: 'vertexMove', id: rectangle.id, index })
   }
 
   const createRectangle = () => {
     if (rectangleSize.widthMm <= 0 || rectangleSize.heightMm <= 0) return
     const bounds = svgRef.current!.getBoundingClientRect()
     const center = worldPoint({ x: bounds.width / 2, y: bounds.height / 2 })
-    const rectangle: DrawingRectangle = { id: crypto.randomUUID(), center, widthMm: rectangleSize.widthMm, heightMm: rectangleSize.heightMm, rotation: 0, color: COLORS[0], width: 3 }
+    const halfWidth = rectangleSize.widthMm / 20; const halfHeight = rectangleSize.heightMm / 20
+    const points: [Point, Point, Point, Point] = [{ x: center.x - halfWidth, y: center.y - halfHeight }, { x: center.x + halfWidth, y: center.y - halfHeight }, { x: center.x + halfWidth, y: center.y + halfHeight }, { x: center.x - halfWidth, y: center.y + halfHeight }]
+    const rectangle: DrawingRectangle = { id: crypto.randomUUID(), points, edgeLengthsMm: [rectangleSize.widthMm, rectangleSize.heightMm, rectangleSize.widthMm, rectangleSize.heightMm], rotation: 0, color: COLORS[0], width: 3 }
     commit({ lines: doc.lines, rectangles: [...(doc.rectangles ?? []), rectangle] }); setSelected(rectangle.id); setTool('select')
   }
 
   const save = async () => { const next = { ...doc, updatedAt: Date.now() }; await saveDrawing(next); setDoc(next); flash('この端末に保存しました'); setMenu(false) }
   const openLibrary = async () => { setSavedDocs(await listDrawings()); setLibrary(true); setMenu(false) }
-  const load = (next: DrawingDocument) => { cancelDrawing(); const normalized = { ...next, rectangles: next.rectangles ?? [] }; setDoc(normalized); setHistory([{ lines: normalized.lines, rectangles: normalized.rectangles }]); setHistoryIndex(0); setSelected(null); setLibrary(false); flash('図面を開きました') }
+  const load = (next: DrawingDocument) => { cancelDrawing(); const normalized = { ...next, rectangles: (next.rectangles ?? []).map(normalizeRectangle) }; setDoc(normalized); setHistory([{ lines: normalized.lines, rectangles: normalized.rectangles }]); setHistoryIndex(0); setSelected(null); setLibrary(false); flash('図面を開きました') }
   const newDrawing = () => { cancelDrawing(); const next = { ...EMPTY, id: crypto.randomUUID(), updatedAt: Date.now(), lines: [], rectangles: [] }; setDoc(next); setHistory([{ lines: [], rectangles: [] }]); setHistoryIndex(0); setSelected(null); setMenu(false) }
   const deleteSelected = () => { if (selected) { commit({ lines: doc.lines.filter(line => line.id !== selected), rectangles: (doc.rectangles ?? []).filter(rectangle => rectangle.id !== selected) }); setSelected(null) } }
   const changeLength = (mm: number) => {
     if (!selectedLine || !Number.isFinite(mm) || mm <= 0) return
     const current = distance(selectedLine.start, selectedLine.end) || 1; const target = mm / 10
     updateSelected({ end: { x: selectedLine.start.x + (selectedLine.end.x - selectedLine.start.x) * target / current, y: selectedLine.start.y + (selectedLine.end.y - selectedLine.start.y) * target / current }, lengthMm: mm })
+  }
+  const changeRectangleEdge = (index: number, mm: number) => {
+    if (!selectedRectangle || !Number.isFinite(mm) || mm <= 0) return
+    const points = [...selectedRectangle.points] as [Point, Point, Point, Point]
+    const start = points[index]; const endIndex = (index + 1) % 4; const end = points[endIndex]
+    const current = distance(start, end) || 1; const target = mm / 10
+    points[endIndex] = { x: start.x + (end.x - start.x) * target / current, y: start.y + (end.y - start.y) * target / current }
+    const lengths = edgeLengths(points); lengths[index] = mm
+    updateSelectedRectangle({ points, edgeLengthsMm: lengths })
+  }
+  const rotateRectangle = (rotation: number) => {
+    if (!selectedRectangle || !Number.isFinite(rotation)) return
+    const center = rectangleCenter(selectedRectangle.points); const delta = (rotation - selectedRectangle.rotation) * Math.PI / 180
+    const points = selectedRectangle.points.map(point => { const x = point.x - center.x; const y = point.y - center.y; return { x: center.x + x * Math.cos(delta) - y * Math.sin(delta), y: center.y + x * Math.sin(delta) + y * Math.cos(delta) } }) as [Point, Point, Point, Point]
+    updateSelectedRectangle({ points, rotation })
   }
 
   return <main className="app">
@@ -194,10 +241,11 @@ export default function App() {
             <text x={(line.start.x + line.end.x) / 2} y={(line.start.y + line.end.y) / 2 - 10 / view.scale} fontSize={12 / view.scale} textAnchor="middle" className="measurement">{line.lengthMm} mm</text>
             {selected === line.id && <><circle cx={line.start.x} cy={line.start.y} r={6 / view.scale} /><circle cx={line.end.x} cy={line.end.y} r={6 / view.scale} /></>}
           </g>)}
-          {(doc.rectangles ?? []).map(rectangle => <g key={rectangle.id} className={selected === rectangle.id ? 'selected-rectangle' : ''} transform={`translate(${rectangle.center.x} ${rectangle.center.y}) rotate(${rectangle.rotation})`} onPointerDown={e => selectRectangle(e, rectangle)}>
-            <rect className="rectangle-hit" x={-rectangle.widthMm / 20} y={-rectangle.heightMm / 20} width={rectangle.widthMm / 10} height={rectangle.heightMm / 10} />
-            <rect className="rectangle-shape" x={-rectangle.widthMm / 20} y={-rectangle.heightMm / 20} width={rectangle.widthMm / 10} height={rectangle.heightMm / 10} fill="rgba(255,255,255,.2)" stroke={rectangle.color} strokeWidth={rectangle.width / view.scale} vectorEffect="non-scaling-stroke" />
-            <text y={-rectangle.heightMm / 20 - 10 / view.scale} fontSize={12 / view.scale} textAnchor="middle" className="measurement">{rectangle.widthMm} × {rectangle.heightMm} mm</text>
+          {(doc.rectangles ?? []).map(rectangle => <g key={rectangle.id} className={selected === rectangle.id ? 'selected-rectangle' : ''} onPointerDown={e => selectRectangle(e, rectangle)}>
+            <polygon className="rectangle-hit" points={rectangle.points.map(point => `${point.x},${point.y}`).join(' ')} />
+            <polygon className="rectangle-shape" points={rectangle.points.map(point => `${point.x},${point.y}`).join(' ')} fill="rgba(255,255,255,.2)" stroke={rectangle.color} strokeWidth={rectangle.width / view.scale} vectorEffect="non-scaling-stroke" />
+            <text x={rectangleCenter(rectangle.points).x} y={rectangleCenter(rectangle.points).y} fontSize={12 / view.scale} textAnchor="middle" className="measurement">{rectangle.edgeLengthsMm.map(value => Math.round(value)).join(' / ')} mm</text>
+            {selected === rectangle.id && rectangle.points.map((point, index) => <circle key={index} className="vertex-handle" cx={point.x} cy={point.y} r={8 / view.scale} onPointerDown={e => moveVertex(e, rectangle, index)} />)}
           </g>)}
           {draft && <line className="draft" x1={draft.start.x} y1={draft.start.y} x2={draft.end.x} y2={draft.end.y} strokeWidth={3 / view.scale} vectorEffect="non-scaling-stroke" />}
         </g>
@@ -227,12 +275,11 @@ export default function App() {
     </aside>}
 
     {selectedRectangle && <aside className="inspector">
-      <div className="inspector-head"><strong>四角形を編集</strong><button onClick={() => setSelected(null)}>完了</button></div>
-      <div className="shape-size-fields">
-        <label><span>横寸法</span><div><input type="number" inputMode="numeric" min="1" value={selectedRectangle.widthMm} onChange={e => updateSelectedRectangle({ widthMm: Number(e.target.value) })} /><em>mm</em></div></label>
-        <label><span>縦寸法</span><div><input type="number" inputMode="numeric" min="1" value={selectedRectangle.heightMm} onChange={e => updateSelectedRectangle({ heightMm: Number(e.target.value) })} /><em>mm</em></div></label>
+      <div className="inspector-head"><strong>四辺形を編集</strong><button onClick={() => setSelected(null)}>完了</button></div>
+      <div className="edge-fields">
+        {selectedRectangle.edgeLengthsMm.map((length, index) => <label key={index}><span>辺 {index + 1}</span><div><input type="number" inputMode="numeric" min="1" value={Math.round(length)} onChange={e => changeRectangleEdge(index, Number(e.target.value))} /><em>mm</em></div></label>)}
       </div>
-      <label className="rotation-field"><span>回転</span><div><input type="range" min="-180" max="180" value={selectedRectangle.rotation} onChange={e => updateSelectedRectangle({ rotation: Number(e.target.value) })} /><input type="number" inputMode="decimal" min="-180" max="180" value={selectedRectangle.rotation} onChange={e => updateSelectedRectangle({ rotation: Number(e.target.value) })} /><em>°</em></div></label>
+      <label className="rotation-field"><span>全体を回転</span><div><input type="range" min="-180" max="180" value={selectedRectangle.rotation} onChange={e => rotateRectangle(Number(e.target.value))} /><input type="number" inputMode="decimal" min="-180" max="180" value={selectedRectangle.rotation} onChange={e => rotateRectangle(Number(e.target.value))} /><em>°</em></div></label>
       <div className="color-row">{COLORS.map(color => <button key={color} className={selectedRectangle.color === color ? 'active' : ''} style={{ background: color }} onClick={() => updateSelectedRectangle({ color })} aria-label={`色 ${color}`} />)}<button className="delete" onClick={deleteSelected}>削除</button></div>
     </aside>}
 
