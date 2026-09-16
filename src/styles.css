@@ -20,6 +20,7 @@ button { border: 0; background: none; cursor: pointer; }
 .selected-line circle { fill: white; stroke: #2f6f69; stroke-width: 2; vector-effect: non-scaling-stroke; }
 .measurement { fill: #66736f; paint-order: stroke; stroke: #f7f2e8; stroke-width: 4px; user-select: none; pointer-events: none; }
 .draft { stroke: #2f6f69; stroke-dasharray: 7 5; }
+.draw-hint { position: fixed; z-index: 10; left: 50%; top: 76px; transform: translateX(-50%); max-width: calc(100vw - 24px); padding: 8px 12px; border-radius: 11px; background: rgba(38,53,50,.88); color: white; font-size: 12px; white-space: nowrap; pointer-events: none; }
 .empty { position: absolute; inset: 0; pointer-events: none; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 5px; color: #68736e; }
 .empty strong { color: #354743; font-size: 16px; }
 .empty span { font-size: 12px; }

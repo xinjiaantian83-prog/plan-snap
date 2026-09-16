@@ -6,7 +6,7 @@ import type { DrawingDocument, DrawingLine, Point } from './types'
 const EMPTY: DrawingDocument = { id: crypto.randomUUID(), name: '名称未設定の図面', updatedAt: Date.now(), lines: [] }
 const COLORS = ['#253331', '#2f6f69', '#bd5a43', '#42658c']
 type View = { x: number; y: number; scale: number }
-type Gesture = { kind: 'draw'; start: Point } | { kind: 'move'; id: string; origin: Point; start: Point; end: Point } | { kind: 'pan'; origin: Point; view: View }
+type Gesture = { kind: 'draw'; start: Point; continuing: boolean } | { kind: 'move'; id: string; origin: Point; start: Point; end: Point } | { kind: 'pan'; origin: Point; view: View }
 
 export default function App() {
   const [doc, setDoc] = useState<DrawingDocument>(EMPTY)
@@ -16,6 +16,7 @@ export default function App() {
   const [tool, setTool] = useState<'select' | 'line'>('line')
   const [view, setView] = useState<View>({ x: 0, y: 0, scale: 1 })
   const [draft, setDraft] = useState<{ start: Point; end: Point } | null>(null)
+  const [drawingStart, setDrawingStart] = useState<Point | null>(null)
   const [gesture, setGesture] = useState<Gesture | null>(null)
   const [grid, setGrid] = useState(true)
   const [snap, setSnap] = useState(true)
@@ -27,10 +28,16 @@ export default function App() {
   const svgRef = useRef<SVGSVGElement>(null)
   const pointers = useRef(new Map<number, Point>())
   const pinch = useRef<{ distance: number; view: View } | null>(null)
+  const touchMoved = useRef(false)
   const selectedLine = useMemo(() => doc.lines.find(line => line.id === selected) ?? null, [doc.lines, selected])
 
+  const cancelDrawing = () => {
+    setDrawingStart(null); setDraft(null)
+    setGesture(current => current?.kind === 'draw' ? null : current)
+  }
+
   useEffect(() => {
-    const down = (e: KeyboardEvent) => { if (e.code === 'Space') { e.preventDefault(); setSpaceDown(true) } if ((e.metaKey || e.ctrlKey) && e.key === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo() } }
+    const down = (e: KeyboardEvent) => { if (e.code === 'Escape') { e.preventDefault(); cancelDrawing() } if (e.code === 'Space') { e.preventDefault(); setSpaceDown(true) } if ((e.metaKey || e.ctrlKey) && e.key === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo() } }
     const up = (e: KeyboardEvent) => { if (e.code === 'Space') setSpaceDown(false) }
     window.addEventListener('keydown', down); window.addEventListener('keyup', up)
     return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up) }
@@ -54,16 +61,35 @@ export default function App() {
     record ? commit(lines) : setDoc(d => ({ ...d, lines }))
   }
 
+  const finishLine = (start: Point, end: Point) => {
+    if (distance(start, end) <= 4) return false
+    const line: DrawingLine = { id: crypto.randomUUID(), start, end, lengthMm: Math.round(distance(start, end) * 10), color: COLORS[0], width: 3, style: 'solid' }
+    commit([...doc.lines, line]); setSelected(line.id); setTool('select'); cancelDrawing()
+    return true
+  }
+
   const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (e.button === 2) { e.preventDefault(); cancelDrawing(); return }
     e.currentTarget.setPointerCapture(e.pointerId)
     const screen = screenPoint(e); pointers.current.set(e.pointerId, screen)
     if (pointers.current.size === 2) {
       const [a, b] = [...pointers.current.values()]
-      pinch.current = { distance: distance(a, b), view: { ...view } }; setGesture(null); setDraft(null); return
+      pinch.current = { distance: distance(a, b), view: { ...view } }; setGesture(null); setDrawingStart(null); setDraft(null); return
     }
     const world = worldPoint(screen)
     if (spaceDown || e.button === 1 || tool === 'select' && e.target === e.currentTarget) { setGesture({ kind: 'pan', origin: screen, view: { ...view } }); return }
-    if (tool === 'line') { setSelected(null); setGesture({ kind: 'draw', start: world }); setDraft({ start: world, end: world }) }
+    if (tool === 'line') {
+      setSelected(null)
+      if (e.pointerType === 'mouse') {
+        if (drawingStart) finishLine(drawingStart, snapPoint(drawingStart, world, doc.lines, snap))
+        else { setDrawingStart(world); setDraft({ start: world, end: world }) }
+      } else {
+        const start = drawingStart ?? world
+        touchMoved.current = false
+        setGesture({ kind: 'draw', start, continuing: drawingStart !== null })
+        setDraft({ start, end: snapPoint(start, world, doc.lines, snap) })
+      }
+    }
   }
 
   const onPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
@@ -74,9 +100,13 @@ export default function App() {
       const center = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
       setView({ x: center.x - (center.x - pinch.current.view.x) * nextScale / pinch.current.view.scale, y: center.y - (center.y - pinch.current.view.y) * nextScale / pinch.current.view.scale, scale: nextScale }); return
     }
-    if (!gesture) return
     const world = worldPoint(screen)
-    if (gesture.kind === 'draw') setDraft({ start: gesture.start, end: snapPoint(gesture.start, world, doc.lines, snap) })
+    if (drawingStart && e.pointerType === 'mouse' && !gesture) setDraft({ start: drawingStart, end: snapPoint(drawingStart, world, doc.lines, snap) })
+    if (!gesture) return
+    if (gesture.kind === 'draw') {
+      if (distance(gesture.start, world) > 4) touchMoved.current = true
+      setDraft({ start: gesture.start, end: snapPoint(gesture.start, world, doc.lines, snap) })
+    }
     if (gesture.kind === 'pan') setView({ ...gesture.view, x: gesture.view.x + screen.x - gesture.origin.x, y: gesture.view.y + screen.y - gesture.origin.y })
     if (gesture.kind === 'move') {
       const delta = { x: world.x - gesture.origin.x, y: world.y - gesture.origin.y }
@@ -86,11 +116,14 @@ export default function App() {
 
   const onPointerUp = (e: React.PointerEvent<SVGSVGElement>) => {
     pointers.current.delete(e.pointerId); if (pointers.current.size < 2) pinch.current = null
-    if (gesture?.kind === 'draw' && draft && distance(draft.start, draft.end) > 4) {
-      const line: DrawingLine = { id: crypto.randomUUID(), start: draft.start, end: draft.end, lengthMm: Math.round(distance(draft.start, draft.end) * 10), color: COLORS[0], width: 3, style: 'solid' }
-      commit([...doc.lines, line]); setSelected(line.id); setTool('select')
+    if (gesture?.kind === 'draw' && draft) {
+      if (touchMoved.current || gesture.continuing) {
+        if (!finishLine(draft.start, draft.end)) { setDrawingStart(draft.start); setDraft({ start: draft.start, end: draft.start }) }
+      } else {
+        setDrawingStart(gesture.start); setDraft({ start: gesture.start, end: gesture.start })
+      }
     } else if (gesture?.kind === 'move') commit(doc.lines)
-    setGesture(null); setDraft(null)
+    setGesture(null)
   }
 
   const onWheel = (e: React.WheelEvent) => {
@@ -99,14 +132,15 @@ export default function App() {
   }
 
   const selectLine = (e: React.PointerEvent, line: DrawingLine) => {
+    if (tool === 'line') return
     e.stopPropagation(); setSelected(line.id); setTool('select')
     setGesture({ kind: 'move', id: line.id, origin: worldPoint(screenPoint(e)), start: line.start, end: line.end })
   }
 
   const save = async () => { const next = { ...doc, updatedAt: Date.now() }; await saveDrawing(next); setDoc(next); flash('この端末に保存しました'); setMenu(false) }
   const openLibrary = async () => { setSavedDocs(await listDrawings()); setLibrary(true); setMenu(false) }
-  const load = (next: DrawingDocument) => { setDoc(next); setHistory([next.lines]); setHistoryIndex(0); setSelected(null); setLibrary(false); flash('図面を開きました') }
-  const newDrawing = () => { const next = { ...EMPTY, id: crypto.randomUUID(), updatedAt: Date.now() }; setDoc(next); setHistory([[]]); setHistoryIndex(0); setSelected(null); setMenu(false) }
+  const load = (next: DrawingDocument) => { cancelDrawing(); setDoc(next); setHistory([next.lines]); setHistoryIndex(0); setSelected(null); setLibrary(false); flash('図面を開きました') }
+  const newDrawing = () => { cancelDrawing(); const next = { ...EMPTY, id: crypto.randomUUID(), updatedAt: Date.now() }; setDoc(next); setHistory([[]]); setHistoryIndex(0); setSelected(null); setMenu(false) }
   const deleteSelected = () => { if (selected) { commit(doc.lines.filter(line => line.id !== selected)); setSelected(null) } }
   const changeLength = (mm: number) => {
     if (!selectedLine || !Number.isFinite(mm) || mm <= 0) return
@@ -126,7 +160,7 @@ export default function App() {
     </header>
 
     <section className="workspace">
-      <svg ref={svgRef} className={`canvas ${spaceDown ? 'panning' : ''}`} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onWheel={onWheel}>
+      <svg ref={svgRef} className={`canvas ${spaceDown ? 'panning' : ''}`} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onContextMenu={e => { e.preventDefault(); cancelDrawing() }} onWheel={onWheel}>
         <defs><pattern id="grid" width={24 * view.scale} height={24 * view.scale} patternUnits="userSpaceOnUse" x={view.x % (24 * view.scale)} y={view.y % (24 * view.scale)}><path d={`M ${24 * view.scale} 0 L 0 0 0 ${24 * view.scale}`} fill="none" stroke="#52635c" strokeOpacity=".1" strokeWidth="1" /></pattern></defs>
         {grid && <rect width="100%" height="100%" fill="url(#grid)" pointerEvents="none" />}
         <g transform={`translate(${view.x} ${view.y}) scale(${view.scale})`}>
@@ -139,7 +173,8 @@ export default function App() {
           {draft && <line className="draft" x1={draft.start.x} y1={draft.start.y} x2={draft.end.x} y2={draft.end.y} strokeWidth={3 / view.scale} vectorEffect="non-scaling-stroke" />}
         </g>
       </svg>
-      {doc.lines.length === 0 && !draft && <div className="empty"><div className="gesture-mark">╱</div><strong>指でなぞって線を引く</strong><span>2本指で拡大・移動できます</span></div>}
+      {doc.lines.length === 0 && !draft && <div className="empty"><div className="gesture-mark">╱</div><strong>クリックまたはタップで始点を指定</strong><span>ドラッグ操作にも対応しています</span></div>}
+      {drawingStart && <div className="draw-hint">終点をクリック · Esc / 右クリックでキャンセル</div>}
       <div className="zoom-chip">{Math.round(view.scale * 100)}%</div>
     </section>
 
@@ -154,7 +189,7 @@ export default function App() {
     </aside>}
 
     <nav className="toolbar" aria-label="作図ツール">
-      <button className={tool === 'line' ? 'active' : ''} onClick={() => { setTool('line'); setSelected(null) }}><span>╱</span>線</button>
+      <button className={tool === 'line' ? 'active' : ''} onClick={() => { cancelDrawing(); setTool('line'); setSelected(null) }}><span>╱</span>線</button>
       <button onClick={() => flash('図形は次の段階で追加予定です')}><span>□</span>図形</button><button onClick={() => flash('テンプレは次の段階で追加予定です')}><span>▦</span>テンプレ</button><button onClick={() => flash('文字は次の段階で追加予定です')}><span>T</span>文字</button>
       <button disabled={historyIndex === 0} onClick={undo}><span>↶</span>戻る</button>
       <button className="redo" disabled={historyIndex >= history.length - 1} onClick={redo} aria-label="やり直す">↷</button>
