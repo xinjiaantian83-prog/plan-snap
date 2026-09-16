@@ -5,6 +5,8 @@ import type { DrawingDocument, DrawingLine, DrawingRectangle, Point } from './ty
 
 const EMPTY: DrawingDocument = { id: crypto.randomUUID(), name: '名称未設定の図面', updatedAt: Date.now(), lines: [], rectangles: [] }
 const COLORS = ['#253331', '#2f6f69', '#bd5a43', '#42658c']
+const MIN_SCALE = .08
+const MAX_SCALE = 4
 type View = { x: number; y: number; scale: number }
 type DrawingState = Pick<DrawingDocument, 'lines' | 'rectangles'>
 type Gesture = { kind: 'draw'; start: Point; continuing: boolean } | { kind: 'move'; id: string; origin: Point; start: Point; end: Point } | { kind: 'rectMove'; id: string; origin: Point; points: [Point, Point, Point, Point] } | { kind: 'vertexMove'; id: string; index: number } | { kind: 'pan'; origin: Point; view: View }
@@ -33,6 +35,7 @@ export default function App() {
   const [gesture, setGesture] = useState<Gesture | null>(null)
   const [grid, setGrid] = useState(true)
   const [snap, setSnap] = useState(true)
+  const [dimensions, setDimensions] = useState(false)
   const [menu, setMenu] = useState(false)
   const [library, setLibrary] = useState(false)
   const [savedDocs, setSavedDocs] = useState<DrawingDocument[]>([])
@@ -86,6 +89,20 @@ export default function App() {
     const perpendiculars = [...doc.lines, ...sides].map(line => ({ ...line, end: { x: line.start.x - (line.end.y - line.start.y), y: line.start.y + (line.end.x - line.start.x) } }))
     return [...doc.lines, ...sides, ...perpendiculars]
   }
+  const fitToContent = (lines: DrawingLine[], rectangles: DrawingRectangle[]) => {
+    const points = [...lines.flatMap(line => [line.start, line.end]), ...rectangles.flatMap(rectangle => rectangle.points)]
+    if (!points.length || !svgRef.current) return
+    const minX = Math.min(...points.map(point => point.x)); const maxX = Math.max(...points.map(point => point.x))
+    const minY = Math.min(...points.map(point => point.y)); const maxY = Math.max(...points.map(point => point.y))
+    const contentWidth = Math.max(maxX - minX, 1); const contentHeight = Math.max(maxY - minY, 1)
+    const bounds = svgRef.current.getBoundingClientRect()
+    const compact = bounds.width < 900
+    const topReserve = 80; const bottomReserve = compact ? 340 : 100; const leftReserve = 20; const rightReserve = compact ? 20 : 360
+    const usableWidth = Math.max(bounds.width - leftReserve - rightReserve, 120); const usableHeight = Math.max(bounds.height - topReserve - bottomReserve, 120)
+    const nextScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.min(usableWidth * .75 / contentWidth, usableHeight * .75 / contentHeight)))
+    const center = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 }
+    setView({ x: leftReserve + usableWidth / 2 - center.x * nextScale, y: topReserve + usableHeight / 2 - center.y * nextScale, scale: nextScale })
+  }
 
   const finishLine = (start: Point, end: Point) => {
     if (distance(start, end) <= 4) return false
@@ -122,7 +139,7 @@ export default function App() {
     const screen = screenPoint(e); if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, screen)
     if (pointers.current.size === 2 && pinch.current) {
       const [a, b] = [...pointers.current.values()]
-      const nextScale = Math.min(4, Math.max(.35, pinch.current.view.scale * distance(a, b) / pinch.current.distance))
+      const nextScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, pinch.current.view.scale * distance(a, b) / pinch.current.distance))
       const center = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
       setView({ x: center.x - (center.x - pinch.current.view.x) * nextScale / pinch.current.view.scale, y: center.y - (center.y - pinch.current.view.y) * nextScale / pinch.current.view.scale, scale: nextScale }); return
     }
@@ -166,7 +183,7 @@ export default function App() {
   }
 
   const onWheel = (e: React.WheelEvent) => {
-    e.preventDefault(); const p = screenPoint(e); const next = Math.min(4, Math.max(.35, view.scale * Math.exp(-e.deltaY * .001)))
+    e.preventDefault(); const p = screenPoint(e); const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, view.scale * Math.exp(-e.deltaY * .001)))
     setView({ x: p.x - (p.x - view.x) * next / view.scale, y: p.y - (p.y - view.y) * next / view.scale, scale: next })
   }
 
@@ -193,7 +210,8 @@ export default function App() {
     const halfWidth = rectangleWidth / 20; const halfHeight = rectangleHeight / 20
     const points: [Point, Point, Point, Point] = [{ x: center.x - halfWidth, y: center.y - halfHeight }, { x: center.x + halfWidth, y: center.y - halfHeight }, { x: center.x + halfWidth, y: center.y + halfHeight }, { x: center.x - halfWidth, y: center.y + halfHeight }]
     const rectangle: DrawingRectangle = { id: crypto.randomUUID(), points, edgeLengthsMm: [rectangleWidth, rectangleHeight, rectangleWidth, rectangleHeight], rotation: 0, color: COLORS[0], width: 3 }
-    commit({ lines: doc.lines, rectangles: [...(doc.rectangles ?? []), rectangle] }); setSelected(rectangle.id); setTool('select')
+    const rectangles = [...(doc.rectangles ?? []), rectangle]
+    commit({ lines: doc.lines, rectangles }); setSelected(rectangle.id); setTool('select'); fitToContent(doc.lines, rectangles)
   }
 
   const save = async () => { const next = { ...doc, updatedAt: Date.now() }; await saveDrawing(next); setDoc(next); flash('この端末に保存しました'); setMenu(false) }
@@ -229,7 +247,7 @@ export default function App() {
       <button className="icon-button" onClick={() => setMenu(!menu)} aria-label="メニュー">•••</button>
       {menu && <div className="menu popover">
         <button onClick={newDrawing}>＋ 新しい図面</button><button onClick={save}>✓ この端末に保存</button><button onClick={openLibrary}>▱ 保存済みを開く</button>
-        <div className="separator" /><label><span>グリッド表示</span><input type="checkbox" checked={grid} onChange={e => setGrid(e.target.checked)} /></label><label><span>スナップ補助</span><input type="checkbox" checked={snap} onChange={e => setSnap(e.target.checked)} /></label>
+        <div className="separator" /><label><span>グリッド表示</span><input type="checkbox" checked={grid} onChange={e => setGrid(e.target.checked)} /></label><label><span>スナップ補助</span><input type="checkbox" checked={snap} onChange={e => setSnap(e.target.checked)} /></label><label><span>寸法表示</span><input type="checkbox" checked={dimensions} onChange={e => setDimensions(e.target.checked)} /></label>
       </div>}
     </header>
 
@@ -247,7 +265,7 @@ export default function App() {
           {(doc.rectangles ?? []).map(rectangle => <g key={rectangle.id} className={selected === rectangle.id ? 'selected-rectangle' : ''} onPointerDown={e => selectRectangle(e, rectangle)}>
             <polygon className="rectangle-hit" points={rectangle.points.map(point => `${point.x},${point.y}`).join(' ')} />
             <polygon className="rectangle-shape" points={rectangle.points.map(point => `${point.x},${point.y}`).join(' ')} fill="rgba(255,255,255,.2)" stroke={rectangle.color} strokeWidth={rectangle.width / view.scale} vectorEffect="non-scaling-stroke" />
-            <text x={rectangleCenter(rectangle.points).x} y={rectangleCenter(rectangle.points).y} fontSize={12 / view.scale} textAnchor="middle" className="measurement">{rectangle.edgeLengthsMm.map(value => Math.round(value)).join(' / ')} mm</text>
+            {(dimensions || selected === rectangle.id) && <text x={rectangleCenter(rectangle.points).x} y={rectangleCenter(rectangle.points).y} fontSize={12 / view.scale} textAnchor="middle" className="measurement">{rectangle.edgeLengthsMm.map(value => Math.round(value)).join(' / ')} mm</text>}
             {selected === rectangle.id && rectangle.points.map((point, index) => <circle key={index} className="vertex-handle" cx={point.x} cy={point.y} r={8 / view.scale} onPointerDown={e => moveVertex(e, rectangle, index)} />)}
           </g>)}
           {draft && <line className="draft" x1={draft.start.x} y1={draft.start.y} x2={draft.end.x} y2={draft.end.y} strokeWidth={3 / view.scale} vectorEffect="non-scaling-stroke" />}
