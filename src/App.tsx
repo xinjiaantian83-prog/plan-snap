@@ -26,7 +26,7 @@ export default function App() {
   const [historyIndex, setHistoryIndex] = useState(0)
   const [selected, setSelected] = useState<string | null>(null)
   const [tool, setTool] = useState<'select' | 'line' | 'rectangle'>('line')
-  const [rectangleSize, setRectangleSize] = useState({ widthMm: 3000, heightMm: 2000 })
+  const [rectangleSize, setRectangleSize] = useState({ widthMm: '3000', heightMm: '2000' })
   const [view, setView] = useState<View>({ x: 0, y: 0, scale: 1 })
   const [draft, setDraft] = useState<{ start: Point; end: Point } | null>(null)
   const [drawingStart, setDrawingStart] = useState<Point | null>(null)
@@ -44,6 +44,9 @@ export default function App() {
   const touchMoved = useRef(false)
   const selectedLine = useMemo(() => doc.lines.find(line => line.id === selected) ?? null, [doc.lines, selected])
   const selectedRectangle = useMemo(() => (doc.rectangles ?? []).find(rectangle => rectangle.id === selected) ?? null, [doc.rectangles, selected])
+  const rectangleWidth = Number(rectangleSize.widthMm)
+  const rectangleHeight = Number(rectangleSize.heightMm)
+  const rectangleSizeValid = rectangleSize.widthMm.trim() !== '' && rectangleSize.heightMm.trim() !== '' && Number.isFinite(rectangleWidth) && Number.isFinite(rectangleHeight) && rectangleWidth > 0 && rectangleHeight > 0
 
   const cancelDrawing = () => {
     setDrawingStart(null); setDraft(null)
@@ -184,12 +187,12 @@ export default function App() {
   }
 
   const createRectangle = () => {
-    if (rectangleSize.widthMm <= 0 || rectangleSize.heightMm <= 0) return
+    if (!rectangleSizeValid) return
     const bounds = svgRef.current!.getBoundingClientRect()
     const center = worldPoint({ x: bounds.width / 2, y: bounds.height / 2 })
-    const halfWidth = rectangleSize.widthMm / 20; const halfHeight = rectangleSize.heightMm / 20
+    const halfWidth = rectangleWidth / 20; const halfHeight = rectangleHeight / 20
     const points: [Point, Point, Point, Point] = [{ x: center.x - halfWidth, y: center.y - halfHeight }, { x: center.x + halfWidth, y: center.y - halfHeight }, { x: center.x + halfWidth, y: center.y + halfHeight }, { x: center.x - halfWidth, y: center.y + halfHeight }]
-    const rectangle: DrawingRectangle = { id: crypto.randomUUID(), points, edgeLengthsMm: [rectangleSize.widthMm, rectangleSize.heightMm, rectangleSize.widthMm, rectangleSize.heightMm], rotation: 0, color: COLORS[0], width: 3 }
+    const rectangle: DrawingRectangle = { id: crypto.randomUUID(), points, edgeLengthsMm: [rectangleWidth, rectangleHeight, rectangleWidth, rectangleHeight], rotation: 0, color: COLORS[0], width: 3 }
     commit({ lines: doc.lines, rectangles: [...(doc.rectangles ?? []), rectangle] }); setSelected(rectangle.id); setTool('select')
   }
 
@@ -258,10 +261,11 @@ export default function App() {
     {tool === 'rectangle' && <aside className="shape-creator">
       <div className="inspector-head"><strong>四角形を作成</strong><button onClick={() => setTool('select')}>閉じる</button></div>
       <div className="shape-size-fields">
-        <label><span>横寸法</span><div><input type="number" inputMode="numeric" min="1" value={rectangleSize.widthMm} onChange={e => setRectangleSize({ ...rectangleSize, widthMm: Number(e.target.value) })} /><em>mm</em></div></label>
-        <label><span>縦寸法</span><div><input type="number" inputMode="numeric" min="1" value={rectangleSize.heightMm} onChange={e => setRectangleSize({ ...rectangleSize, heightMm: Number(e.target.value) })} /><em>mm</em></div></label>
+        <label><span>横寸法</span><div><input type="number" inputMode="numeric" min="1" value={rectangleSize.widthMm} onFocus={e => e.currentTarget.select()} onChange={e => setRectangleSize({ ...rectangleSize, widthMm: e.target.value })} /><em>mm</em></div></label>
+        <label><span>縦寸法</span><div><input type="number" inputMode="numeric" min="1" value={rectangleSize.heightMm} onFocus={e => e.currentTarget.select()} onChange={e => setRectangleSize({ ...rectangleSize, heightMm: e.target.value })} /><em>mm</em></div></label>
       </div>
-      <button className="create-shape" onClick={createRectangle}>中央に作成</button>
+      {!rectangleSizeValid && <p className="size-error">1以上の寸法を入力してください</p>}
+      <button className="create-shape" disabled={!rectangleSizeValid} onClick={createRectangle}>中央に作成</button>
     </aside>}
 
     {selectedLine && <aside className="inspector">

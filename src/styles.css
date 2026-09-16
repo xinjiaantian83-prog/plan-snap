@@ -48,6 +48,8 @@ button { border: 0; background: none; cursor: pointer; }
 .shape-size-fields input, .edge-fields input, .rotation-field input[type="number"] { width: 100%; height: 40px; margin-top: 4px; padding: 0 34px 0 9px; border: 1px solid #dce1dd; border-radius: 10px; background: #f9faf8; color: #263532; }
 .shape-size-fields em, .edge-fields em, .rotation-field em { position: absolute; right: 9px; top: 17px; font-style: normal; color: #7c8682; font-size: 11px; }
 .create-shape { width: 100%; height: 42px; margin-top: 12px; border-radius: 12px; background: #2f6f69; color: white; font-weight: 700; }
+.create-shape:disabled { cursor: default; background: #c9d2cf; color: #f7f9f8; }
+.size-error { margin: 8px 2px -5px; color: #ae493d; font-size: 11px; }
 .rotation-field { margin-top: 12px; }
 .rotation-field > div { display: grid; grid-template-columns: 1fr 76px; gap: 10px; align-items: center; }
 .rotation-field input[type="range"] { width: 100%; accent-color: #2f6f69; }
