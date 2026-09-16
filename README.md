@@ -33,13 +33,14 @@ npm run preview
 
 - PCでは「線」を選び、始点をクリックしてからポインタでプレビューし、終点をクリックして確定。Escまたは右クリックでキャンセル
 - スマートフォン・タブレットでは2タップ方式と、従来のドラッグ確定方式の両方に対応
+- 「図形」から横・縦の実寸を入力して四角形を中央へ生成。選択後は移動、回転、寸法再編集が可能
 - 線をタップして選択し、ドラッグで移動
 - 選択時だけ表示されるパネルから長さ（mm）、色、太さ、実線・破線を編集
 - 2本指のピンチでズーム、2本指で移動。PCはホイールでズーム、Space + ドラッグで移動
 - 右上の「…」から新規作成、端末保存、再編集、グリッドとスナップの表示切替
 - 下部の「戻る」と、その上の「やり直し」で Undo / Redo
 
-「図形」「テンプレ」「文字」は将来の入口として配置していますが、第1段階では未実装です。
+「テンプレ」「文字」は将来の入口として配置していますが、現段階では未実装です。
 
 ## データ構造
 
@@ -49,6 +50,7 @@ type DrawingDocument = {
   name: string
   updatedAt: number
   lines: DrawingLine[]
+  rectangles: DrawingRectangle[]
 }
 
 type DrawingLine = {
@@ -60,13 +62,23 @@ type DrawingLine = {
   width: number
   style: 'solid' | 'dashed'
 }
+
+type DrawingRectangle = {
+  id: string
+  center: { x: number; y: number }
+  widthMm: number
+  heightMm: number
+  rotation: number
+  color: string
+  width: number
+}
 ```
 
 座標はキャンバスの論理座標、`lengthMm` は入力された実寸値です。表示倍率・パン位置は図面データと分離しています。保存先はブラウザの `plansnap-db` IndexedDB です。
 
 ## 今後追加可能な機能
 
-- 矩形・円・寸法線・文字
+- 円・寸法線・文字
 - 部屋、建具、設備などのテンプレート
 - 端点・交点・等間隔スナップ
 - レイヤー、複数選択、コピー

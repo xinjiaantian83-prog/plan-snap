@@ -18,6 +18,8 @@ button { border: 0; background: none; cursor: pointer; }
 .line-hit { stroke: transparent; stroke-width: 24; vector-effect: non-scaling-stroke; }
 .selected-line > line:not(.line-hit) { filter: drop-shadow(0 0 3px rgba(47,111,105,.35)); }
 .selected-line circle { fill: white; stroke: #2f6f69; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.rectangle-hit { fill: transparent; stroke: transparent; stroke-width: 20; vector-effect: non-scaling-stroke; }
+.selected-rectangle .rectangle-shape { filter: drop-shadow(0 0 4px rgba(47,111,105,.42)); stroke-dasharray: 7 4; }
 .measurement { fill: #66736f; paint-order: stroke; stroke: #f7f2e8; stroke-width: 4px; user-select: none; pointer-events: none; }
 .draft { stroke: #2f6f69; stroke-dasharray: 7 5; }
 .draw-hint { position: fixed; z-index: 10; left: 50%; top: 76px; transform: translateX(-50%); max-width: calc(100vw - 24px); padding: 8px 12px; border-radius: 11px; background: rgba(38,53,50,.88); color: white; font-size: 12px; white-space: nowrap; pointer-events: none; }
@@ -37,6 +39,16 @@ button { border: 0; background: none; cursor: pointer; }
 .menu button:hover { background: #f3f5f2; }
 .separator { height: 1px; background: #e8ebe7; margin: 5px; }
 .inspector { position: fixed; z-index: 21; left: 50%; transform: translateX(-50%); bottom: calc(91px + env(safe-area-inset-bottom)); width: min(560px, calc(100vw - 20px)); padding: 14px; border-radius: 20px; background: rgba(255,255,255,.96); box-shadow: 0 14px 40px rgba(42,42,35,.18); }
+.shape-creator { position: fixed; z-index: 21; left: 50%; top: 74px; transform: translateX(-50%); width: min(360px, calc(100vw - 20px)); padding: 14px; border-radius: 18px; background: rgba(255,255,255,.97); box-shadow: 0 14px 40px rgba(42,42,35,.16); }
+.shape-size-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.shape-size-fields label, .rotation-field { display: block; font-size: 11px; color: #69736f; }
+.shape-size-fields label > div, .rotation-field > div { position: relative; }
+.shape-size-fields input, .rotation-field input[type="number"] { width: 100%; height: 40px; margin-top: 4px; padding: 0 34px 0 9px; border: 1px solid #dce1dd; border-radius: 10px; background: #f9faf8; color: #263532; }
+.shape-size-fields em, .rotation-field em { position: absolute; right: 9px; top: 17px; font-style: normal; color: #7c8682; font-size: 11px; }
+.create-shape { width: 100%; height: 42px; margin-top: 12px; border-radius: 12px; background: #2f6f69; color: white; font-weight: 700; }
+.rotation-field { margin-top: 12px; }
+.rotation-field > div { display: grid; grid-template-columns: 1fr 76px; gap: 10px; align-items: center; }
+.rotation-field input[type="range"] { width: 100%; accent-color: #2f6f69; }
 .inspector-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .inspector-head button { color: #2f6f69; font-weight: 700; }
 .fields { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 8px; }

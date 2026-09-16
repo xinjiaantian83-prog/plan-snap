@@ -9,9 +9,19 @@ export type DrawingLine = {
   width: number
   style: LineStyle
 }
+export type DrawingRectangle = {
+  id: string
+  center: Point
+  widthMm: number
+  heightMm: number
+  rotation: number
+  color: string
+  width: number
+}
 export type DrawingDocument = {
   id: string
   name: string
   updatedAt: number
   lines: DrawingLine[]
+  rectangles: DrawingRectangle[]
 }
